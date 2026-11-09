@@ -10,7 +10,7 @@ The repo follows the sample cefsimple with a few tweaks. The tweaks are :
 The repo is built with 
 
 ```
-cmake -B build -G Xcode
+cmake -B build -G Xcode -DUSE_SANDBOX=OFF
 cmake --build build --config Release --target strome
 open build/src/Release/strome.app
 ```
