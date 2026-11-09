@@ -1,6 +1,6 @@
 #include "strome.hpp"
 
-#include "simple_handler.hpp"
+#include "handler.hpp"
 
 #include "include/cef_browser.h"
 #include "include/views/cef_browser_view.h"
@@ -10,20 +10,18 @@
 
 namespace {
 
-// Window delegate - controls window behavior
+
 class SimpleWindowDelegate : public CefWindowDelegate {
  public:
   explicit SimpleWindowDelegate(CefRefPtr<CefBrowserView> browser_view)
       : browser_view_(browser_view) {}
 
   void OnWindowCreated(CefRefPtr<CefWindow> window) override {
-    // Add the browser view and show the window
     window->AddChildView(browser_view_);
     window->Show();
   }
 
   bool CanClose(CefRefPtr<CefWindow> window) override {
-    // Allow the window to close if the browser says it's OK
     CefRefPtr<CefBrowser> browser = browser_view_->GetBrowser();
     if (browser) {
       return browser->GetHost()->TryCloseBrowser();
@@ -46,7 +44,6 @@ class SimpleWindowDelegate : public CefWindowDelegate {
   DISALLOW_COPY_AND_ASSIGN(SimpleWindowDelegate);
 };
 
-// Browser view delegate
 class SimpleBrowserViewDelegate : public CefBrowserViewDelegate {
  public:
   SimpleBrowserViewDelegate() = default;
@@ -60,18 +57,16 @@ class SimpleBrowserViewDelegate : public CefBrowserViewDelegate {
   DISALLOW_COPY_AND_ASSIGN(SimpleBrowserViewDelegate);
 };
 
-}  // namespace
+}
 
 SimpleApp::SimpleApp() = default;
 
 void SimpleApp::OnContextInitialized() {
     CEF_REQUIRE_UI_THREAD();
 
-      // Get command-line arguments
       CefRefPtr<CefCommandLine> command_line =
           CefCommandLine::GetGlobalCommandLine();
 
-      // Check for --url= parameter
       std::string url = command_line->GetSwitchValue("url");
       if (url.empty()) {
         url = "haibeey.site";  // Default URL
