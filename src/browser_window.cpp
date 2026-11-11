@@ -1,34 +1,42 @@
 #include "browser_window.hpp"
 
+#include <cstdlib>
 #include <string>
 #include <utility>
 
 #include "browser_window_manager.hpp"
+#include "browser_ui.hpp"
+#include "include/cef_color_ids.h"
+#include "include/cef_load_handler.h"
 #include "include/cef_parser.h"
 #include "include/cef_request_context_handler.h"
+#include "include/cef_request_handler.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_fill_layout.h"
+#include "include/views/cef_panel_delegate.h"
 #include "include/wrapper/cef_helpers.h"
 
 namespace {
 
 constexpr int kWindowId = 1;
-constexpr int kUrlTextfieldId = 2;
-constexpr int kGoButtonId = 3;
-constexpr int kNewTabButtonId = 4;
 
-// View IDs for tab controls. The tab id is added to each base value, so the
-// two ranges must not overlap and must stay below kTabCloseIdBase for titles.
-constexpr int kTabTitleIdBase = 1000;
-constexpr int kTabCloseIdBase = 100000;
-
-// Accelerator command IDs are separate from View IDs.
+// Accelerator command IDs.
 constexpr int kCommandNewTab = 30001;
 constexpr int kCommandCloseTab = 30002;
 constexpr int kCommandFocusUrl = 30003;
 
-constexpr int kReturnKey = 0x0D;
+// Height reserved at the top of the window for the chrome UI.
+constexpr int kTabStripHeight = 40;
+constexpr int kToolbarHeight = 36;
+constexpr int kChromeHeight = kTabStripHeight + kToolbarHeight;
+
+// Width reserved on the left for the native macOS window buttons.
+constexpr int kWindowButtonsWidth = 80;
+
 constexpr char kDefaultUrl[] = "https://google.com";
+constexpr cef_color_t kContentBackground = 0xFF202124;
+constexpr cef_color_t kTabStripBackground = 0xFF1B1B1E;
+constexpr cef_color_t kToolbarBackground = 0xFF2A2B2E;
 
 class AlloyBrowserViewDelegate : public CefBrowserViewDelegate {
  public:
@@ -41,6 +49,36 @@ class AlloyBrowserViewDelegate : public CefBrowserViewDelegate {
  private:
   IMPLEMENT_REFCOUNTING(AlloyBrowserViewDelegate);
   DISALLOW_COPY_AND_ASSIGN(AlloyBrowserViewDelegate);
+};
+
+// The chrome browser view: alloy style.
+class ChromeViewDelegate : public CefBrowserViewDelegate {
+ public:
+  ChromeViewDelegate() = default;
+
+  cef_runtime_style_t GetBrowserRuntimeStyle() override {
+    return CEF_RUNTIME_STYLE_ALLOY;
+  }
+
+ private:
+  IMPLEMENT_REFCOUNTING(ChromeViewDelegate);
+  DISALLOW_COPY_AND_ASSIGN(ChromeViewDelegate);
+};
+
+// A panel with a fixed preferred size on either axis (0 = unconstrained).
+class FixedSizePanelDelegate : public CefPanelDelegate {
+ public:
+  FixedSizePanelDelegate(int width, int height)
+      : width_(width), height_(height) {}
+
+  CefSize GetPreferredSize(CefRefPtr<CefView> view) override {
+    return CefSize(width_, height_);
+  }
+
+ private:
+  const int width_;
+  const int height_;
+  IMPLEMENT_REFCOUNTING(FixedSizePanelDelegate);
 };
 
 std::string Trim(const std::string& value) {
@@ -96,13 +134,45 @@ std::string NormalizeUrl(const std::string& input) {
          CefURIEncode(CefString(text), false).ToString();
 }
 
-std::string DisplayTitle(const std::string& title) {
-  const std::string text = title.empty() ? "New Tab" : title;
-  constexpr size_t kMaxLength = 24;
-  if (text.size() <= kMaxLength) {
-    return text;
+int ParseInt(const std::string& value, int fallback) {
+  if (value.empty()) {
+    return fallback;
   }
-  return text.substr(0, kMaxLength - 3) + "...";
+  char* end = nullptr;
+  const long result = std::strtol(value.c_str(), &end, 10);
+  if (end == value.c_str() || *end != '\0') {
+    return fallback;
+  }
+  return static_cast<int>(result);
+}
+
+std::string JsonEscape(const std::string& value) {
+  std::string out;
+  out.reserve(value.size());
+  for (char c : value) {
+    switch (c) {
+      case '"':
+        out += "\\\"";
+        break;
+      case '\\':
+        out += "\\\\";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      default:
+        if (static_cast<unsigned char>(c) >= 0x20) {
+          out += c;
+        }
+    }
+  }
+  return out;
 }
 
 }  // namespace
@@ -151,14 +221,17 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
 void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
   CEF_REQUIRE_UI_THREAD();
 
+  if (message_router_) {
+    message_router_->RemoveHandler(this);
+    message_router_ = nullptr;
+  }
+
   browser_to_tab_.clear();
   tabs_.clear();
-  tab_strip_ = nullptr;
-  toolbar_ = nullptr;
   content_ = nullptr;
-  url_textfield_ = nullptr;
-  new_tab_button_ = nullptr;
-  go_button_ = nullptr;
+  chrome_view_ = nullptr;
+  chrome_browser_ = nullptr;
+  chrome_view_delegate_ = nullptr;
   browser_view_delegate_ = nullptr;
   window_ = nullptr;
 
@@ -205,8 +278,7 @@ CefRect BrowserWindow::GetInitialBounds(CefRefPtr<CefWindow> window) {
 }
 
 CefSize BrowserWindow::GetPreferredSize(CefRefPtr<CefView> view) {
-  // This object is also the delegate for buttons and the text field, so only
-  // report a preferred size for the top-level window.
+  // Only report a preferred size for the top-level window.
   if (view && view->GetID() == kWindowId) {
     return CefSize(1000, 700);
   }
@@ -225,9 +297,10 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window,
       CloseActiveTab();
       return true;
     case kCommandFocusUrl:
-      if (url_textfield_) {
-        url_textfield_->RequestFocus();
-        url_textfield_->SelectAll(true);
+      if (chrome_browser_ && chrome_browser_->GetMainFrame()) {
+        chrome_browser_->GetMainFrame()->ExecuteJavaScript(
+            "window.strome && window.strome.focusAddress();",
+            chrome_browser_->GetMainFrame()->GetURL(), 0);
       }
       return true;
     default:
@@ -237,6 +310,64 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window,
 
 cef_runtime_style_t BrowserWindow::GetWindowRuntimeStyle() {
   return CEF_RUNTIME_STYLE_ALLOY;
+}
+
+bool BrowserWindow::IsFrameless(CefRefPtr<CefWindow> window) {
+  // The chrome UI provides the entire window frame, so hide the native title
+  // bar. Standard window buttons are still shown on top (see below).
+  return true;
+}
+
+bool BrowserWindow::WithStandardWindowButtons(CefRefPtr<CefWindow> window) {
+  // Keep the native macOS traffic lights, overlaid on the tab strip.
+  return true;
+}
+
+bool BrowserWindow::GetTitlebarHeight(CefRefPtr<CefWindow> window,
+                                      float* titlebar_height) {
+  // Position the traffic lights halfway down the tab strip.
+  *titlebar_height = static_cast<float>(kTabStripHeight);
+  return true;
+}
+
+void BrowserWindow::OnDraggableRegionsChanged(
+    CefRefPtr<CefBrowser> browser,
+    CefRefPtr<CefFrame> frame,
+    const std::vector<CefDraggableRegion>& regions) {
+  CEF_REQUIRE_UI_THREAD();
+
+  if (!window_ || !chrome_browser_ || !browser->IsSame(chrome_browser_)) {
+    return;
+  }
+
+  // The chrome view is offset by the window-buttons gap, so shift its
+  // coordinates into window space.
+  std::vector<CefDraggableRegion> window_regions = regions;
+  for (auto& region : window_regions) {
+    region.bounds.x += kWindowButtonsWidth;
+  }
+  window_->SetDraggableRegions(window_regions);
+}
+
+bool BrowserWindow::OnProcessMessageReceived(
+    CefRefPtr<CefBrowser> browser,
+    CefRefPtr<CefFrame> frame,
+    CefProcessId source_process,
+    CefRefPtr<CefProcessMessage> message) {
+  return message_router_ &&
+         message_router_->OnProcessMessageReceived(browser, frame,
+                                                   source_process, message);
+}
+
+bool BrowserWindow::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+                                   CefRefPtr<CefFrame> frame,
+                                   CefRefPtr<CefRequest> request,
+                                   bool user_gesture,
+                                   bool is_redirect) {
+  if (message_router_) {
+    message_router_->OnBeforeBrowse(browser, frame);
+  }
+  return false;
 }
 
 void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser,
@@ -254,11 +385,8 @@ void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser,
   }
 
   tab->url = url.ToString();
-
-  // Do not fight the user while they are editing the address bar.
-  if (tab->id == active_tab_id_ && url_textfield_ &&
-      !url_textfield_->HasFocus()) {
-    url_textfield_->SetText(url);
+  if (tab->id == active_tab_id_) {
+    PushChromeState();
   }
 }
 
@@ -272,9 +400,21 @@ void BrowserWindow::OnTitleChange(CefRefPtr<CefBrowser> browser,
   }
 
   tab->title = title.ToString();
-  UpdateTabStrip();
   if (tab->id == active_tab_id_) {
     UpdateWindowTitle();
+  }
+  PushChromeState();
+}
+
+void BrowserWindow::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
+                                         bool isLoading,
+                                         bool canGoBack,
+                                         bool canGoForward) {
+  CEF_REQUIRE_UI_THREAD();
+
+  Tab* tab = GetTabByBrowserId(browser->GetIdentifier());
+  if (tab && tab->id == active_tab_id_) {
+    PushChromeState();
   }
 }
 
@@ -286,8 +426,13 @@ void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     return;
   }
 
-  Tab* tab = nullptr;
   CefRefPtr<CefBrowserView> view = CefBrowserView::GetForBrowser(browser);
+  if (view && chrome_view_ && view->IsSame(chrome_view_)) {
+    chrome_browser_ = browser;
+    return;
+  }
+
+  Tab* tab = nullptr;
   if (view) {
     for (auto& candidate : tabs_) {
       if (candidate.browser_view.get() == view.get()) {
@@ -311,6 +456,15 @@ void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
 void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
 
+  if (message_router_) {
+    message_router_->OnBeforeClose(browser);
+  }
+
+  if (chrome_browser_ && browser->IsSame(chrome_browser_)) {
+    chrome_browser_ = nullptr;
+    return;
+  }
+
   auto it = browser_to_tab_.find(browser->GetIdentifier());
   if (it == browser_to_tab_.end()) {
     return;
@@ -330,32 +484,59 @@ void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   }
 }
 
-bool BrowserWindow::OnKeyEvent(CefRefPtr<CefTextfield> textfield,
-                               const CefKeyEvent& event) {
+bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
+                            CefRefPtr<CefFrame> frame,
+                            int64_t query_id,
+                            const CefString& request,
+                            bool persistent,
+                            CefRefPtr<Callback> callback) {
   CEF_REQUIRE_UI_THREAD();
 
-  if (event.type == KEYEVENT_RAWKEYDOWN &&
-      event.windows_key_code == kReturnKey) {
-    NavigateTo(textfield->GetText().ToString());
-    return true;
+  // Only the chrome UI may drive the window.
+  if (!chrome_browser_ || !browser->IsSame(chrome_browser_)) {
+    return false;
   }
-  return false;
-}
 
-void BrowserWindow::OnButtonPressed(CefRefPtr<CefButton> button) {
-  CEF_REQUIRE_UI_THREAD();
+  const std::string req = request.ToString();
+  const size_t sep = req.find('|');
+  const std::string command = sep == std::string::npos ? req : req.substr(0, sep);
+  const std::string arg =
+      sep == std::string::npos ? std::string() : req.substr(sep + 1);
 
-  const int id = button->GetID();
-  if (id == kNewTabButtonId) {
+  if (command == "ready") {
+    PushChromeState();
+  } else if (command == "newtab") {
     CreateTab(kDefaultUrl);
-  } else if (id == kGoButtonId) {
-    NavigateTo(url_textfield_ ? url_textfield_->GetText().ToString()
-                              : std::string());
-  } else if (id >= kTabTitleIdBase && id < kTabCloseIdBase) {
-    ActivateTab(id - kTabTitleIdBase);
-  } else if (id >= kTabCloseIdBase) {
-    CloseTab(id - kTabCloseIdBase);
+  } else if (command == "activate") {
+    const int id = ParseInt(arg, 0);
+    if (id != 0) {
+      ActivateTab(id);
+    }
+  } else if (command == "close") {
+    const int id = ParseInt(arg, 0);
+    if (id != 0) {
+      CloseTab(id);
+    }
+  } else if (command == "navigate") {
+    NavigateTo(arg);
+  } else if (command == "back" || command == "forward" ||
+             command == "reload") {
+    Tab* tab = GetActiveTab();
+    CefRefPtr<CefBrowser> target =
+        tab && tab->browser_view ? tab->browser_view->GetBrowser() : nullptr;
+    if (target) {
+      if (command == "back") {
+        target->GoBack();
+      } else if (command == "forward") {
+        target->GoForward();
+      } else {
+        target->Reload();
+      }
+    }
   }
+
+  callback->Success("");
+  return true;
 }
 
 void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
@@ -363,65 +544,74 @@ void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
   window->SetID(kWindowId);
   window->SetTitle("Strome");
 
+  // Dark theme so the native/OS chrome and any gaps match the UI.
+  window->SetThemeColor(CEF_ColorPrimaryBackground, kContentBackground);
+
   CefBoxLayoutSettings window_settings;
   window_settings.horizontal = false;
   CefRefPtr<CefBoxLayout> window_layout =
       window->SetToBoxLayout(window_settings);
 
-  // Tab strip.
-  tab_strip_ = CefPanel::CreatePanel(nullptr);
-  CefBoxLayoutSettings tab_settings;
-  tab_settings.horizontal = true;
-  tab_settings.between_child_spacing = 2;
-  tab_settings.inside_border_horizontal_spacing = 4;
-  tab_settings.inside_border_vertical_spacing = 2;
-  tab_strip_->SetToBoxLayout(tab_settings);
-  window->AddChildView(tab_strip_);
+  // Top row: a fixed 80px gap for the native macOS window buttons, then the
+  // chrome UI browser view filling the rest. The chrome view must not overlap
+  // the button region because browser views render above the native buttons.
+  CefRefPtr<CefPanel> chrome_row =
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, kChromeHeight));
+  CefBoxLayoutSettings row_settings;
+  row_settings.horizontal = true;
+  CefRefPtr<CefBoxLayout> row_layout = chrome_row->SetToBoxLayout(row_settings);
+  window->AddChildView(chrome_row);
 
-  new_tab_button_ =
-      CefLabelButton::CreateLabelButton(CefRefPtr<CefButtonDelegate>(this), "+");
-  new_tab_button_->SetID(kNewTabButtonId);
-  new_tab_button_->SetFocusable(false);
-  new_tab_button_->SetTooltipText("New tab");
-  tab_strip_->AddChildView(new_tab_button_);
+  CefRefPtr<CefPanel> gap =
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(kWindowButtonsWidth,
+                                                       kChromeHeight));
+  CefBoxLayoutSettings gap_settings;
+  gap_settings.horizontal = false;
+  gap->SetToBoxLayout(gap_settings);
+  CefRefPtr<CefPanel> gap_strip =
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, kTabStripHeight));
+  gap_strip->SetBackgroundColor(kTabStripBackground);
+  gap->AddChildView(gap_strip);
+  CefRefPtr<CefPanel> gap_toolbar =
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, kToolbarHeight));
+  gap_toolbar->SetBackgroundColor(kToolbarBackground);
+  gap->AddChildView(gap_toolbar);
+  chrome_row->AddChildView(gap);
 
-  // Address bar.
-  toolbar_ = CefPanel::CreatePanel(nullptr);
-  CefBoxLayoutSettings toolbar_settings;
-  toolbar_settings.horizontal = true;
-  toolbar_settings.between_child_spacing = 4;
-  toolbar_settings.inside_border_horizontal_spacing = 4;
-  toolbar_settings.inside_border_vertical_spacing = 2;
-  CefRefPtr<CefBoxLayout> toolbar_layout =
-      toolbar_->SetToBoxLayout(toolbar_settings);
+  CefRefPtr<CefPanel> chrome_panel =
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, kChromeHeight));
+  chrome_panel->SetToFillLayout();
+  chrome_panel->SetBackgroundColor(kTabStripBackground);
+  chrome_row->AddChildView(chrome_panel);
+  row_layout->SetFlexForView(chrome_panel, 1);
 
-  url_textfield_ =
-      CefTextfield::CreateTextfield(CefRefPtr<CefTextfieldDelegate>(this));
-  url_textfield_->SetID(kUrlTextfieldId);
-  url_textfield_->SetAccessibleName("Address");
-  toolbar_->AddChildView(url_textfield_);
-  toolbar_layout->SetFlexForView(url_textfield_, 1);
+  chrome_view_delegate_ = new ChromeViewDelegate();
+  CefBrowserSettings chrome_settings;
+  chrome_view_ = CefBrowserView::CreateBrowserView(
+      CefRefPtr<CefClient>(this), chrome_ui::kUrl, chrome_settings, nullptr,
+      nullptr, chrome_view_delegate_);
+  chrome_panel->AddChildView(chrome_view_);
 
-  go_button_ =
-      CefLabelButton::CreateLabelButton(CefRefPtr<CefButtonDelegate>(this), "Go");
-  go_button_->SetID(kGoButtonId);
-  go_button_->SetFocusable(false);
-  toolbar_->AddChildView(go_button_);
-  window->AddChildView(toolbar_);
-
-  // All BrowserViews overlap; only the active one is visible.
+  // All tab BrowserViews overlap here; only the active one is visible.
   content_ = CefPanel::CreatePanel(nullptr);
   content_->SetToFillLayout();
+  content_->SetBackgroundColor(kContentBackground);
   window->AddChildView(content_);
   window_layout->SetFlexForView(content_, 1);
 
   browser_view_delegate_ = new AlloyBrowserViewDelegate();
+
+  message_router_ =
+      CefMessageRouterBrowserSide::Create(CefMessageRouterConfig());
+  message_router_->AddHandler(this, /*first=*/false);
 
   // On macOS CEF maps ctrl_pressed to the Command key, so these become Cmd+T,
   // Cmd+W and Cmd+L there and Ctrl+T/W/L on Windows and Linux.
   window->SetAccelerator(kCommandNewTab, 'T', false, true, false, true);
   window->SetAccelerator(kCommandCloseTab, 'W', false, true, false, true);
   window->SetAccelerator(kCommandFocusUrl, 'L', false, true, false, true);
+
+  window->ThemeChanged();
 }
 
 void BrowserWindow::CreateTab(const std::string& url,
@@ -444,28 +634,6 @@ void BrowserWindow::CreateTab(const std::string& url,
   tab.title = "New Tab";
   tab.request_context = request_context;
 
-  tab.strip_item = CefPanel::CreatePanel(nullptr);
-  CefBoxLayoutSettings strip_item_settings;
-  strip_item_settings.horizontal = true;
-  strip_item_settings.between_child_spacing = 2;
-  strip_item_settings.inside_border_horizontal_spacing = 6;
-  strip_item_settings.inside_border_vertical_spacing = 2;
-  tab.strip_item->SetToBoxLayout(strip_item_settings);
-
-  tab.title_button = CefLabelButton::CreateLabelButton(
-      CefRefPtr<CefButtonDelegate>(this), DisplayTitle(tab.title));
-  tab.title_button->SetID(kTabTitleIdBase + tab.id);
-  tab.title_button->SetFocusable(false);
-  tab.strip_item->AddChildView(tab.title_button);
-
-  tab.close_button = CefLabelButton::CreateLabelButton(
-      CefRefPtr<CefButtonDelegate>(this), "x");
-  tab.close_button->SetID(kTabCloseIdBase + tab.id);
-  tab.close_button->SetFocusable(false);
-  tab.close_button->SetTooltipText("Close tab");
-  tab.close_button->SetMinimumSize(CefSize(0, 0));
-  tab.strip_item->AddChildView(tab.close_button);
-
   CefBrowserSettings browser_settings;
   tab.browser_view = CefBrowserView::CreateBrowserView(
       CefRefPtr<CefClient>(this), CefString(url), browser_settings, nullptr,
@@ -477,12 +645,6 @@ void BrowserWindow::CreateTab(const std::string& url,
     content_->AddChildView(tab.browser_view);
   }
   pending_tab_id_ = 0;
-
-  if (tab_strip_) {
-    const int insert_index =
-        static_cast<int>(tab_strip_->GetChildViewCount()) - 1;
-    tab_strip_->AddChildViewAt(tab.strip_item, insert_index);
-  }
 
   ActivateTab(tab.id);
 }
@@ -500,18 +662,15 @@ void BrowserWindow::ActivateTab(int tab_id) {
     }
   }
 
-  if (url_textfield_) {
-    url_textfield_->SetText(target->url);
-  }
-  UpdateTabStrip();
-  UpdateWindowTitle();
-
   if (target->browser_view) {
     target->browser_view->RequestFocus();
   }
   if (content_) {
     content_->Layout();
   }
+
+  UpdateWindowTitle();
+  PushChromeState();
 }
 
 void BrowserWindow::CloseTab(int tab_id) {
@@ -535,9 +694,6 @@ void BrowserWindow::CloseTab(int tab_id) {
 
   Tab& tab = tabs_[index];
 
-  if (tab.strip_item && tab_strip_) {
-    tab_strip_->RemoveChildView(tab.strip_item);
-  }
   if (tab.browser_view && content_) {
     content_->RemoveChildView(tab.browser_view);
   }
@@ -599,31 +755,52 @@ void BrowserWindow::NavigateTo(const std::string& input) {
   }
 
   tab->url = url;
-  if (url_textfield_) {
-    url_textfield_->SetText(url);
-  }
   browser->GetMainFrame()->LoadURL(url);
   tab->browser_view->RequestFocus();
+  PushChromeState();
 }
 
-void BrowserWindow::UpdateTabStrip() {
-  if (!tab_strip_) {
+void BrowserWindow::PushChromeState() {
+  if (!chrome_browser_ || !chrome_browser_->GetMainFrame()) {
     return;
   }
+  CefRefPtr<CefFrame> frame = chrome_browser_->GetMainFrame();
+  frame->ExecuteJavaScript("window.strome && window.strome.update(" +
+                               BuildChromeState() + ");",
+                           frame->GetURL(), 0);
+}
 
-  const cef_color_t active_color = CefColorSetARGB(0xFF, 0xE3, 0xE8, 0xF0);
-  const cef_color_t inactive_color = CefColorSetARGB(0xFF, 0xF5, 0xF5, 0xF5);
+std::string BrowserWindow::BuildChromeState() {
+  Tab* active = GetActiveTab();
 
-  for (auto& tab : tabs_) {
-    if (tab.title_button) {
-      tab.title_button->SetText(DisplayTitle(tab.title));
+  std::string json = "{\"tabs\":[";
+  bool first = true;
+  for (const auto& tab : tabs_) {
+    if (!first) {
+      json += ",";
     }
-    if (tab.strip_item) {
-      tab.strip_item->SetBackgroundColor(
-          tab.id == active_tab_id_ ? active_color : inactive_color);
-    }
+    first = false;
+    json += "{\"id\":" + std::to_string(tab.id) + ",\"title\":\"" +
+            JsonEscape(tab.title) + "\",\"active\":" +
+            (tab.id == active_tab_id_ ? "true" : "false") + "}";
   }
-  tab_strip_->Layout();
+  json += "]";
+
+  json += ",\"url\":\"" + JsonEscape(active ? active->url : std::string()) + "\"";
+
+  bool can_back = false;
+  bool can_forward = false;
+  CefRefPtr<CefBrowser> browser =
+      active && active->browser_view ? active->browser_view->GetBrowser()
+                                     : nullptr;
+  if (browser) {
+    can_back = browser->CanGoBack();
+    can_forward = browser->CanGoForward();
+  }
+  json += std::string(",\"canBack\":") + (can_back ? "true" : "false");
+  json += std::string(",\"canForward\":") + (can_forward ? "true" : "false");
+  json += "}";
+  return json;
 }
 
 void BrowserWindow::UpdateWindowTitle() {

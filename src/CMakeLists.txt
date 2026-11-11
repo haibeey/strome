@@ -6,6 +6,8 @@ set(STROME_SRCS
   browser_window.hpp
   browser_window_manager.cpp
   browser_window_manager.hpp
+  browser_ui.cpp
+  browser_ui.hpp
 )
 
 set(STROME_SRCS_MAC mac/strome.mm)
