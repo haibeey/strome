@@ -1,83 +1,21 @@
 #include "strome.hpp"
 
-#include "handler.hpp"
-
-#include "include/cef_browser.h"
-#include "include/views/cef_browser_view.h"
-#include "include/views/cef_window.h"
-#include "include/wrapper/cef_helpers.h"
+#include "browser_window_manager.hpp"
 #include "include/cef_command_line.h"
+#include "include/wrapper/cef_helpers.h"
 
-namespace {
+StromeApp::StromeApp() = default;
 
+void StromeApp::OnContextInitialized() {
+  CEF_REQUIRE_UI_THREAD();
 
-class SimpleWindowDelegate : public CefWindowDelegate {
- public:
-  explicit SimpleWindowDelegate(CefRefPtr<CefBrowserView> browser_view)
-      : browser_view_(browser_view) {}
+  CefRefPtr<CefCommandLine> command_line =
+      CefCommandLine::GetGlobalCommandLine();
 
-  void OnWindowCreated(CefRefPtr<CefWindow> window) override {
-    window->AddChildView(browser_view_);
-    window->Show();
+  std::string url = command_line->GetSwitchValue("url");
+  if (url.empty()) {
+    url = "https://google.com";
   }
 
-  bool CanClose(CefRefPtr<CefWindow> window) override {
-    CefRefPtr<CefBrowser> browser = browser_view_->GetBrowser();
-    if (browser) {
-      return browser->GetHost()->TryCloseBrowser();
-    }
-    return true;
-  }
-
-  CefSize GetPreferredSize(CefRefPtr<CefView> view) override {
-    return CefSize(800, 600);
-  }
-
-  cef_runtime_style_t GetWindowRuntimeStyle() override {
-    return CEF_RUNTIME_STYLE_ALLOY;
-  }
-
- private:
-  CefRefPtr<CefBrowserView> browser_view_;
-
-  IMPLEMENT_REFCOUNTING(SimpleWindowDelegate);
-  DISALLOW_COPY_AND_ASSIGN(SimpleWindowDelegate);
-};
-
-class SimpleBrowserViewDelegate : public CefBrowserViewDelegate {
- public:
-  SimpleBrowserViewDelegate() = default;
-
-  cef_runtime_style_t GetBrowserRuntimeStyle() override {
-    return CEF_RUNTIME_STYLE_ALLOY;
-  }
-
- private:
-  IMPLEMENT_REFCOUNTING(SimpleBrowserViewDelegate);
-  DISALLOW_COPY_AND_ASSIGN(SimpleBrowserViewDelegate);
-};
-
-}
-
-SimpleApp::SimpleApp() = default;
-
-void SimpleApp::OnContextInitialized() {
-    CEF_REQUIRE_UI_THREAD();
-
-      CefRefPtr<CefCommandLine> command_line =
-          CefCommandLine::GetGlobalCommandLine();
-
-      std::string url = command_line->GetSwitchValue("url");
-      if (url.empty()) {
-        url = "haibeey.site";  // Default URL
-      }
-
-      CefRefPtr<SimpleHandler> handler(new SimpleHandler());
-      CefBrowserSettings browser_settings;
-
-      CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-          handler, url, browser_settings, nullptr, nullptr,
-          new SimpleBrowserViewDelegate());
-
-      CefWindow::CreateTopLevelWindow(new SimpleWindowDelegate(browser_view));
+  BrowserWindowManager::GetInstance()->CreateWindow(url);
 }

@@ -3,9 +3,9 @@
 
 #include "include/cef_app.h"
 
-class SimpleApp : public CefApp, public CefBrowserProcessHandler {
+class StromeApp : public CefApp, public CefBrowserProcessHandler {
  public:
-  SimpleApp();
+  StromeApp();
 
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
     return this;
@@ -14,8 +14,8 @@ class SimpleApp : public CefApp, public CefBrowserProcessHandler {
   void OnContextInitialized() override;
 
  private:
-  IMPLEMENT_REFCOUNTING(SimpleApp);
-  DISALLOW_COPY_AND_ASSIGN(SimpleApp);
+  IMPLEMENT_REFCOUNTING(StromeApp);
+  DISALLOW_COPY_AND_ASSIGN(StromeApp);
 };
 
 #endif

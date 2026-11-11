@@ -2,8 +2,10 @@
 set(STROME_SRCS
   strome.cpp
   strome.hpp
-  handler.cpp
-  handler.hpp
+  browser_window.cpp
+  browser_window.hpp
+  browser_window_manager.cpp
+  browser_window_manager.hpp
 )
 
 set(STROME_SRCS_MAC mac/strome.mm)
