@@ -1,2 +1,4 @@
 CompileFlags:
-  CompilationDatabase: cef/macosx64
+  CompilationDatabase: .
+  Remove:
+    - -Werror

@@ -1,4 +1,6 @@
 build
+build-clangd
+compile_commands.json
 .cache
 cef/*
 practice

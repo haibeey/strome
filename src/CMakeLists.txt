@@ -33,7 +33,8 @@ set(CEFSIMPLE_RESOURCES_MAC_ENGLISH_LPROJ_SRCS_MAC
   mac/English.lproj/MainMenu.xib
   )
 APPEND_PLATFORM_SOURCES(CEFSIMPLE_RESOURCES_MAC_ENGLISH_LPROJ_SRCS)
-source_group(strome\\\\mac\\\\English.lproj FILES ${CEFSIMPLE_RESOURCES_MAC_ENGLISH_LPROJ_SRCS})
+source_group(strome\\\\mac\\\\English.lproj FILES
+${CEFSIMPLE_RESOURCES_MAC_ENGLISH_LPROJ_SRCS})
 
 set(CEFSIMPLE_RESOURCES_SRCS
   ${CEFSIMPLE_RESOURCES_MAC_SRCS}
@@ -56,7 +57,8 @@ SET_CEF_TARGET_OUT_DIR()
 # Mac OS X configuration.
 #
 if(OS_MAC)
-  option(OPTION_USE_ARC "Build with ARC (automatic Reference Counting) on macOS." ON)
+  option(OPTION_USE_ARC
+  "Build with ARC (automatic Reference Counting) on macOS." ON)
   if(OPTION_USE_ARC)
     list(APPEND CEF_COMPILER_FLAGS
       -fobjc-arc
@@ -72,7 +74,8 @@ if(OS_MAC)
   set(EXECUTABLE_NAME "${CEF_TARGET}")
   set(PRODUCT_NAME "${CEF_TARGET}")
 
-  add_executable(${CEF_TARGET} MACOSX_BUNDLE ${CEFSIMPLE_RESOURCES_SRCS} ${STROME_SRCS})
+  add_executable(${CEF_TARGET} MACOSX_BUNDLE
+  ${CEFSIMPLE_RESOURCES_SRCS} ${STROME_SRCS})
   SET_EXECUTABLE_TARGET_PROPERTIES(${CEF_TARGET})
   add_dependencies(${CEF_TARGET} libcef_dll_wrapper)
   target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_STANDARD_LIBS})
@@ -92,17 +95,23 @@ if(OS_MAC)
     set(_helper_target "${CEF_HELPER_TARGET}${_target_suffix}")
     set(_helper_output_name "${CEF_HELPER_OUTPUT_NAME}${_name_suffix}")
 
-    set(_helper_info_plist "${CMAKE_CURRENT_BINARY_DIR}/helper-Info${_target_suffix}.plist")
-    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/mac/helper-Info.plist.in" _plist_contents)
-    string(REPLACE "\${EXECUTABLE_NAME}" "${_helper_output_name}" _plist_contents ${_plist_contents})
-    string(REPLACE "\${PRODUCT_NAME}" "${_helper_output_name}" _plist_contents ${_plist_contents})
-    string(REPLACE "\${BUNDLE_ID_SUFFIX}" "${_plist_suffix}" _plist_contents ${_plist_contents})
+    set(_helper_info_plist
+    "${CMAKE_CURRENT_BINARY_DIR}/helper-Info${_target_suffix}.plist")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/mac/helper-Info.plist.in"
+    _plist_contents)
+    string(REPLACE "\${EXECUTABLE_NAME}" "${_helper_output_name}"
+    _plist_contents ${_plist_contents})
+    string(REPLACE "\${PRODUCT_NAME}" "${_helper_output_name}"
+    _plist_contents ${_plist_contents})
+    string(REPLACE "\${BUNDLE_ID_SUFFIX}" "${_plist_suffix}"
+    _plist_contents ${_plist_contents})
     file(WRITE ${_helper_info_plist} ${_plist_contents})
 
     add_executable(${_helper_target} MACOSX_BUNDLE ${STROME_HELPER_SRCS})
     SET_EXECUTABLE_TARGET_PROPERTIES(${_helper_target})
     add_dependencies(${_helper_target} libcef_dll_wrapper)
-    target_link_libraries(${_helper_target} libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+    target_link_libraries(${_helper_target} libcef_dll_wrapper
+    ${CEF_STANDARD_LIBS})
     set_target_properties(${_helper_target} PROPERTIES
       MACOSX_BUNDLE_INFO_PLIST ${_helper_info_plist}
       OUTPUT_NAME ${_helper_output_name}
@@ -121,5 +130,17 @@ if(OS_MAC)
   endforeach()
 
   set(PREFIXES "mac/")
-  COPY_MAC_RESOURCES("${CEFSIMPLE_RESOURCES_SRCS}" "${PREFIXES}" "${CEF_TARGET}" "${CMAKE_CURRENT_SOURCE_DIR}" "${CEF_APP}")
+  COPY_MAC_RESOURCES("${CEFSIMPLE_RESOURCES_SRCS}" "${PREFIXES}"
+  "${CEF_TARGET}" "${CMAKE_CURRENT_SOURCE_DIR}" "${CEF_APP}")
+
+  add_custom_command(
+    TARGET ${CEF_TARGET}
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+    "${CEF_APP}/Contents/Resources/views"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_CURRENT_SOURCE_DIR}/views/menu.html"
+            "${CEF_APP}/Contents/Resources/views/menu.html"
+    VERBATIM
+    )
 endif()

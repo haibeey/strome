@@ -44,13 +44,21 @@ constexpr cef_color_t toolbar_background = 0xFF2A2B2E;
 
 class AlloyBrowserViewDelegate : public CefBrowserViewDelegate {
  public:
-  AlloyBrowserViewDelegate() = default;
+  explicit AlloyBrowserViewDelegate(BrowserWindow* owner) : owner_(owner) {}
 
   cef_runtime_style_t GetBrowserRuntimeStyle() override {
     return CEF_RUNTIME_STYLE_ALLOY;
   }
 
+  bool OnPopupBrowserViewCreated(
+      CefRefPtr<CefBrowserView> browser_view,
+      CefRefPtr<CefBrowserView> popup_browser_view,
+      bool is_devtools) override {
+    return owner_ && owner_->AdoptPopupView(popup_browser_view);
+  }
+
  private:
+  BrowserWindow* owner_;
   IMPLEMENT_REFCOUNTING(AlloyBrowserViewDelegate);
   DISALLOW_COPY_AND_ASSIGN(AlloyBrowserViewDelegate);
 };
@@ -299,10 +307,10 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window,
       CloseActiveTab();
       return true;
     case command_focus_url:
-      if (chrome_browser_ && chrome_browser_->GetMainFrame()) {
-        chrome_browser_->GetMainFrame()->ExecuteJavaScript(
+      if (browser_ && browser_->GetMainFrame()) {
+        browser_->GetMainFrame()->ExecuteJavaScript(
             "window.strome && window.strome.focusAddress();",
-            chrome_browser_->GetMainFrame()->GetURL(), 0);
+            browser_->GetMainFrame()->GetURL(), 0);
       }
       return true;
     default:
@@ -338,7 +346,7 @@ void BrowserWindow::OnDraggableRegionsChanged(
     const std::vector<CefDraggableRegion>& regions) {
   CEF_REQUIRE_UI_THREAD();
 
-  if (!window_ || !chrome_browser_ || !browser->IsSame(chrome_browser_)) {
+  if (!window_ || !browser_ || !browser->IsSame(browser_)) {
     return;
   }
 
@@ -388,7 +396,7 @@ void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser,
 
   tab->url = url.ToString();
   if (tab->id == active_tab_id_) {
-    PushChromeState();
+    PushState();
   }
 }
 
@@ -405,7 +413,7 @@ void BrowserWindow::OnTitleChange(CefRefPtr<CefBrowser> browser,
   if (tab->id == active_tab_id_) {
     UpdateWindowTitle();
   }
-  PushChromeState();
+  PushState();
 }
 
 void BrowserWindow::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
@@ -416,7 +424,7 @@ void BrowserWindow::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
 
   Tab* tab = GetTabByBrowserId(browser->GetIdentifier());
   if (tab && tab->id == active_tab_id_) {
-    PushChromeState();
+    PushState();
   }
 }
 
@@ -429,8 +437,8 @@ void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
   }
 
   CefRefPtr<CefBrowserView> view = CefBrowserView::GetForBrowser(browser);
-  if (view && chrome_view_ && view->IsSame(chrome_view_)) {
-    chrome_browser_ = browser;
+  if (view && view_ && view->IsSame(view_)) {
+    browser_ = browser;
     return;
   }
 
@@ -462,8 +470,8 @@ void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     message_router_->OnBeforeClose(browser);
   }
 
-  if (chrome_browser_ && browser->IsSame(chrome_browser_)) {
-    chrome_browser_ = nullptr;
+  if (browser_ && browser->IsSame(browser_)) {
+    browser_ = nullptr;
     return;
   }
 
@@ -474,11 +482,42 @@ void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
 
   Tab* tab = GetTabById(it->second);
   browser_to_tab_.erase(it);
-  if (tab) {
-    tab->browser_id = -1;
+  if (!tab) {
+    return;
   }
+
+  tab->browser_id = -1;
   if (open_tab_browsers_ > 0) {
     --open_tab_browsers_;
+  }
+
+  // A tab browser can close itself (for example window.close() from a popup
+  // that was adopted as a tab). Drop its UI in that case. During a window
+  // close the tabs are already being torn down, so only do bookkeeping.
+  if (!closing_window_) {
+    const int tab_id = tab->id;
+    for (size_t i = 0; i < tabs_.size(); ++i) {
+      if (tabs_[i].id != tab_id) {
+        continue;
+      }
+      if (tabs_[i].browser_view && content_) {
+        content_->RemoveChildView(tabs_[i].browser_view);
+      }
+      tabs_.erase(tabs_.begin() + i);
+      break;
+    }
+
+    if (tabs_.empty()) {
+      if (window_) {
+        window_->Close();
+      }
+      return;
+    }
+
+    if (active_tab_id_ == tab_id) {
+      active_tab_id_ = tabs_.front().id;
+    }
+    ActivateTab(active_tab_id_);
   }
 
   if (open_tab_browsers_ == 0 && closing_window_ && window_) {
@@ -495,7 +534,7 @@ bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
   CEF_REQUIRE_UI_THREAD();
 
   // Only the chrome UI may drive the window.
-  if (!chrome_browser_ || !browser->IsSame(chrome_browser_)) {
+  if (!browser_ || !browser->IsSame(browser_)) {
     return false;
   }
 
@@ -506,7 +545,7 @@ bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
       sep == std::string::npos ? std::string() : req.substr(sep + 1);
 
   if (command == "ready") {
-    PushChromeState();
+    PushState();
   } else if (command == "newtab") {
     CreateTab(default_url);
   } else if (command == "activate") {
@@ -543,7 +582,7 @@ bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
 
 void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
   window_ = window;
-  window->SetID(kWindowId);
+  window->SetID(window_id);
   window->SetTitle("Strome");
 
   // Dark theme so the native/OS chrome and any gaps match the UI.
@@ -582,17 +621,17 @@ void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
 
   CefRefPtr<CefPanel> panel =
       CefPanel::CreatePanel(new FixedSizePanelDelegate(0, chrome_height));
-  chrome_panel->SetToFillLayout();
-  chrome_panel->SetBackgroundColor(tab_strip_background);
+  panel->SetToFillLayout();
+  panel->SetBackgroundColor(tab_strip_background);
   chrome_row->AddChildView(panel);
   row_layout->SetFlexForView(panel, 1);
 
-  chrome_view_delegate_ = new ChromeViewDelegate();
+  view_delegate_ = new ViewDelegate();
   CefBrowserSettings settings;
-  chrome_view_ = CefBrowserView::CreateBrowserView(
+  view_ = CefBrowserView::CreateBrowserView(
       CefRefPtr<CefClient>(this), views::url, settings, nullptr,
-      nullptr, chrome_view_delegate_);
-  chrome_panel->AddChildView(chrome_view_);
+      nullptr, view_delegate_);
+  panel->AddChildView(view_);
 
   // All tab BrowserViews overlap here; only the active one is visible.
   content_ = CefPanel::CreatePanel(nullptr);
@@ -601,7 +640,7 @@ void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
   window->AddChildView(content_);
   window_layout->SetFlexForView(content_, 1);
 
-  browser_view_delegate_ = new AlloyBrowserViewDelegate();
+  browser_view_delegate_ = new AlloyBrowserViewDelegate(this);
 
   message_router_ =
       CefMessageRouterBrowserSide::Create(CefMessageRouterConfig());
@@ -651,6 +690,33 @@ void BrowserWindow::CreateTab(const std::string& url,
   ActivateTab(tab.id);
 }
 
+bool BrowserWindow::AdoptPopupView(CefRefPtr<CefBrowserView> popup_view) {
+  CEF_REQUIRE_UI_THREAD();
+
+  if (!popup_view || !content_) {
+    return false;
+  }
+
+  CefRefPtr<CefBrowser> browser = popup_view->GetBrowser();
+
+  tabs_.emplace_back();
+  Tab& tab = tabs_.back();
+  tab.id = next_tab_id_++;
+  tab.title = "Sign in";
+  tab.browser_view = popup_view;
+  if (browser) {
+    tab.browser_id = browser->GetIdentifier();
+    browser_to_tab_[tab.browser_id] = tab.id;
+    tab.request_context = browser->GetHost()->GetRequestContext();
+    ++open_tab_browsers_;
+  }
+
+  popup_view->SetVisible(false);
+  content_->AddChildView(popup_view);
+  ActivateTab(tab.id);
+  return true;
+}
+
 void BrowserWindow::ActivateTab(int tab_id) {
   Tab* target = GetTabById(tab_id);
   if (!target) {
@@ -672,7 +738,7 @@ void BrowserWindow::ActivateTab(int tab_id) {
   }
 
   UpdateWindowTitle();
-  PushChromeState();
+  PushState();
 }
 
 void BrowserWindow::CloseTab(int tab_id) {
@@ -759,20 +825,20 @@ void BrowserWindow::NavigateTo(const std::string& input) {
   tab->url = url;
   browser->GetMainFrame()->LoadURL(url);
   tab->browser_view->RequestFocus();
-  PushChromeState();
+  PushState();
 }
 
-void BrowserWindow::PushChromeState() {
-  if (!chrome_browser_ || !chrome_browser_->GetMainFrame()) {
+void BrowserWindow::PushState() {
+  if (!browser_ || !browser_->GetMainFrame()) {
     return;
   }
-  CefRefPtr<CefFrame> frame = chrome_browser_->GetMainFrame();
+  CefRefPtr<CefFrame> frame = browser_->GetMainFrame();
   frame->ExecuteJavaScript("window.strome && window.strome.update(" +
-                               BuildChromeState() + ");",
+                               BuildState() + ");",
                            frame->GetURL(), 0);
 }
 
-std::string BrowserWindow::BuildChromeState() {
+std::string BrowserWindow::BuildState() {
   Tab* active = GetActiveTab();
 
   std::string json = "{\"tabs\":[";

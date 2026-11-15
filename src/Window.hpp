@@ -42,6 +42,10 @@ class BrowserWindow : public CefWindowDelegate,
   // Brings the window to the front.
   void Activate();
 
+  // Hosts a popup browser view (for example a Google sign-in window) as a tab
+  // in this window. Returns true if the view was adopted.
+  bool AdoptPopupView(CefRefPtr<CefBrowserView> popup_view);
+
   // Requests that all tab browsers close. When |force_close| is false,
   // beforeunload handlers are allowed to run.
   void Close(bool force_close);
