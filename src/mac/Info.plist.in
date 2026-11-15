@@ -7,7 +7,7 @@
 	<key>CFBundleExecutable</key>
 	<string>${EXECUTABLE_NAME}</string>
 	<key>CFBundleIconFile</key>
-	<string>cefsimple.icns</string>
+	<string>strome.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.haibeey.strome</string>
 	<key>CFBundleInfoDictionaryVersion</key>
