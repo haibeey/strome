@@ -9,7 +9,7 @@
 	<key>CFBundleIconFile</key>
 	<string>cefsimple.icns</string>
 	<key>CFBundleIdentifier</key>
-	<string>org.cef.cefsimple</string>
+	<string>com.haibeey.strome</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -19,9 +19,9 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>${VERSION_SHORT}</string>
+	<string>0.0.1</string>
 	<key>CFBundleShortVersionString</key>
-	<string>${VERSION_SHORT}</string>
+	<string>0.0.1</string>
 	<key>LSEnvironment</key>
 	<dict>
 		<key>MallocNanoZone</key>

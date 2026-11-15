@@ -7,7 +7,19 @@ project(strome)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/cef/macosx64")
+# CEF binary distribution root. Override with -DCEF_ROOT=... (e.g. cef/macosarm64).
+if(NOT DEFINED CEF_ROOT)
+  if(APPLE)
+    if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64" OR CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
+      set(CEF_PLATFORM "macosarm64")
+    else()
+      set(CEF_PLATFORM "macosx64")
+    endif()
+  else()
+    set(CEF_PLATFORM "linux64")
+  endif()
+  set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/cef/${CEF_PLATFORM}")
+endif()
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CEF_ROOT}/cmake")
 
 find_package(CEF REQUIRED)
