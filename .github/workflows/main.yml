@@ -30,7 +30,7 @@ jobs:
             cef_platform: macosx64
             cmake_arch: x86_64
           - arch: arm64
-            runner: macos-14
+            runner: macos-15
             cef_platform: macosarm64
             cmake_arch: arm64
     env:
@@ -50,10 +50,11 @@ jobs:
         if: steps.cache-cef.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
+          brew install aria2
           mkdir -p cef
           url="https://cef-builds.spotifycdn.com/cef_binary_${CEF_VERSION}_${{ matrix.cef_platform }}.tar.bz2"
           echo "Downloading $url"
-          curl -fL --retry 3 "$url" -o /tmp/cef.tar.bz2
+          aria2c -x 16 -s 16 -k 1M --file-allocation=none --retry-wait=3 -m 3 -d /tmp -o cef.tar.bz2 "$url"
           tar -xjf /tmp/cef.tar.bz2 -C /tmp
           mv "/tmp/cef_binary_${CEF_VERSION}_${{ matrix.cef_platform }}" "cef/${{ matrix.cef_platform }}"
 
