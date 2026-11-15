@@ -6,7 +6,6 @@
 
 #include "include/cef_color_ids.h"
 #include "include/cef_load_handler.h"
-#include "include/cef_parser.h"
 #include "include/cef_request_context_handler.h"
 #include "include/cef_request_handler.h"
 #include "include/views/cef_box_layout.h"
@@ -16,6 +15,7 @@
 
 #include "Window.hpp"
 #include "Manager.hpp"
+#include "UrlUtil.h"
 #include "views/HomePage.hpp"
 
 namespace {
@@ -91,100 +91,6 @@ class FixedSizePanelDelegate : public CefPanelDelegate {
   const int height_;
   IMPLEMENT_REFCOUNTING(FixedSizePanelDelegate);
 };
-
-std::string Trim(const std::string& value) {
-  constexpr char kWhitespace[] = " \t\r\n";
-  const size_t begin = value.find_first_not_of(kWhitespace);
-  if (begin == std::string::npos) {
-    return std::string();
-  }
-  const size_t end = value.find_last_not_of(kWhitespace);
-  return value.substr(begin, end - begin + 1);
-}
-
-bool HasScheme(const std::string& value) {
-  if (value.find("://") != std::string::npos) {
-    return true;
-  }
-  constexpr const char* kSchemes[] = {"about:", "file:", "chrome:",
-                                      "view-source:"};
-  for (const char* scheme : kSchemes) {
-    if (value.rfind(scheme, 0) == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool LooksLikeHost(const std::string& value) {
-  if (value.find_first_of(" \t\r\n") != std::string::npos) {
-    return false;
-  }
-  return value.find('.') != std::string::npos ||
-         value.rfind("localhost", 0) == 0 ||
-         value.find(':') != std::string::npos;
-}
-
-// Turns whatever the user typed into something a browser can load. A bare host
-// becomes an https URL, and anything else becomes a search query.
-std::string NormalizeUrl(const std::string& input) {
-  const std::string text = Trim(input);
-  if (text.empty()) {
-    return std::string();
-  }
-  if (HasScheme(text)) {
-    return text;
-  }
-  if (LooksLikeHost(text)) {
-    if (text.rfind("localhost", 0) == 0) {
-      return "http://" + text;
-    }
-    return "https://" + text;
-  }
-  return "https://www.google.com/search?q=" +
-         CefURIEncode(CefString(text), false).ToString();
-}
-
-int ParseInt(const std::string& value, int fallback) {
-  if (value.empty()) {
-    return fallback;
-  }
-  char* end = nullptr;
-  const long result = std::strtol(value.c_str(), &end, 10);
-  if (end == value.c_str() || *end != '\0') {
-    return fallback;
-  }
-  return static_cast<int>(result);
-}
-
-std::string JsonEscape(const std::string& value) {
-  std::string out;
-  out.reserve(value.size());
-  for (char c : value) {
-    switch (c) {
-      case '"':
-        out += "\\\"";
-        break;
-      case '\\':
-        out += "\\\\";
-        break;
-      case '\n':
-        out += "\\n";
-        break;
-      case '\r':
-        out += "\\r";
-        break;
-      case '\t':
-        out += "\\t";
-        break;
-      default:
-        if (static_cast<unsigned char>(c) >= 0x20) {
-          out += c;
-        }
-    }
-  }
-  return out;
-}
 
 }  // namespace
 
@@ -549,12 +455,12 @@ bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
   } else if (command == "newtab") {
     CreateTab(default_url);
   } else if (command == "activate") {
-    const int id = ParseInt(arg, 0);
+    const int id = strome::ParseInt(arg, 0);
     if (id != 0) {
       ActivateTab(id);
     }
   } else if (command == "close") {
-    const int id = ParseInt(arg, 0);
+    const int id = strome::ParseInt(arg, 0);
     if (id != 0) {
       CloseTab(id);
     }
@@ -596,12 +502,12 @@ void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
   // Top row: a fixed 80px gap for the native macOS window buttons, then the
   // chrome UI browser view filling the rest. The chrome view must not overlap
   // the button region because browser views render above the native buttons.
-  CefRefPtr<CefPanel> chrome_row =
+  CefRefPtr<CefPanel> row =
       CefPanel::CreatePanel(new FixedSizePanelDelegate(0, chrome_height));
   CefBoxLayoutSettings row_settings;
   row_settings.horizontal = true;
-  CefRefPtr<CefBoxLayout> row_layout = chrome_row->SetToBoxLayout(row_settings);
-  window->AddChildView(chrome_row);
+  CefRefPtr<CefBoxLayout> row_layout = row->SetToBoxLayout(row_settings);
+  window->AddChildView(row);
 
   CefRefPtr<CefPanel> gap =
       CefPanel::CreatePanel(new FixedSizePanelDelegate(window_buttons_width,
@@ -617,13 +523,13 @@ void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
       CefPanel::CreatePanel(new FixedSizePanelDelegate(0, toolbar_height));
   gap_toolbar->SetBackgroundColor(toolbar_background);
   gap->AddChildView(gap_toolbar);
-  chrome_row->AddChildView(gap);
+  row->AddChildView(gap);
 
   CefRefPtr<CefPanel> panel =
       CefPanel::CreatePanel(new FixedSizePanelDelegate(0, chrome_height));
   panel->SetToFillLayout();
   panel->SetBackgroundColor(tab_strip_background);
-  chrome_row->AddChildView(panel);
+  row->AddChildView(panel);
   row_layout->SetFlexForView(panel, 1);
 
   view_delegate_ = new ViewDelegate();
@@ -807,7 +713,7 @@ void BrowserWindow::CloseActiveTab() {
 }
 
 void BrowserWindow::NavigateTo(const std::string& input) {
-  const std::string url = NormalizeUrl(input);
+  const std::string url = strome::NormalizeUrl(input);
   if (url.empty()) {
     return;
   }
@@ -849,12 +755,12 @@ std::string BrowserWindow::BuildState() {
     }
     first = false;
     json += "{\"id\":" + std::to_string(tab.id) + ",\"title\":\"" +
-            JsonEscape(tab.title) + "\",\"active\":" +
+            strome::JsonEscape(tab.title) + "\",\"active\":" +
             (tab.id == active_tab_id_ ? "true" : "false") + "}";
   }
   json += "]";
 
-  json += ",\"url\":\"" + JsonEscape(active ? active->url : std::string()) + "\"";
+  json += ",\"url\":\"" + strome::JsonEscape(active ? active->url : std::string()) + "\"";
 
   bool can_back = false;
   bool can_forward = false;

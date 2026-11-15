@@ -6,6 +6,8 @@ set(STROME_SRCS
   Window.hpp
   Manager.cpp
   Manager.hpp
+  UrlUtil.cpp
+  UrlUtil.h
   views/HomePage.cpp
   views/HomePage.hpp
 )
