@@ -3,12 +3,9 @@
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_message_router.h"
 
-#include "browser_ui.hpp"
+#include "views/HomePage.hpp"
 
-// Minimal app used by all CEF sub-processes (renderer, GPU, utility, plugin).
-// The renderer process needs the renderer side of the message router so that
-// the chrome UI page can use cefQuery() to talk to the browser process, and
-// every process must register the custom scheme.
+
 class StromeHelperApp : public CefApp, public CefRenderProcessHandler {
  public:
   StromeHelperApp() = default;
@@ -19,7 +16,7 @@ class StromeHelperApp : public CefApp, public CefRenderProcessHandler {
 
   void OnRegisterCustomSchemes(
       CefRawPtr<CefSchemeRegistrar> registrar) override {
-    registrar->AddCustomScheme(chrome_ui::kScheme,
+    registrar->AddCustomScheme(views::scheme,
                                CEF_SCHEME_OPTION_STANDARD |
                                    CEF_SCHEME_OPTION_SECURE |
                                    CEF_SCHEME_OPTION_CORS_ENABLED);

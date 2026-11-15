@@ -1,11 +1,9 @@
-#include "browser_window.hpp"
 
 #include <cstdlib>
 #include <string>
 #include <utility>
 
-#include "browser_window_manager.hpp"
-#include "browser_ui.hpp"
+
 #include "include/cef_color_ids.h"
 #include "include/cef_load_handler.h"
 #include "include/cef_parser.h"
@@ -16,27 +14,33 @@
 #include "include/views/cef_panel_delegate.h"
 #include "include/wrapper/cef_helpers.h"
 
+#include "Window.hpp"
+#include "Manager.hpp"
+#include "views/HomePage.hpp"
+
 namespace {
 
-constexpr int kWindowId = 1;
+constexpr int window_id = 1;
+constexpr int window_height = 700;
+constexpr int window_width = 1000;
 
 // Accelerator command IDs.
-constexpr int kCommandNewTab = 30001;
-constexpr int kCommandCloseTab = 30002;
-constexpr int kCommandFocusUrl = 30003;
+constexpr int command_new_tab = 30001;
+constexpr int command_close_tab = 30002;
+constexpr int command_focus_url = 30003;
 
 // Height reserved at the top of the window for the chrome UI.
-constexpr int kTabStripHeight = 40;
-constexpr int kToolbarHeight = 36;
-constexpr int kChromeHeight = kTabStripHeight + kToolbarHeight;
+constexpr int tab_strip_height = 40;
+constexpr int toolbar_height = 36;
+constexpr int chrome_height = tab_strip_height + toolbar_height;
 
 // Width reserved on the left for the native macOS window buttons.
-constexpr int kWindowButtonsWidth = 80;
+constexpr int window_buttons_width = 80;
 
-constexpr char kDefaultUrl[] = "https://google.com";
-constexpr cef_color_t kContentBackground = 0xFF202124;
-constexpr cef_color_t kTabStripBackground = 0xFF1B1B1E;
-constexpr cef_color_t kToolbarBackground = 0xFF2A2B2E;
+constexpr char default_url[] = "https://google.com";
+constexpr cef_color_t content_background = 0xFF202124;
+constexpr cef_color_t tab_strip_background = 0xFF1B1B1E;
+constexpr cef_color_t toolbar_background = 0xFF2A2B2E;
 
 class AlloyBrowserViewDelegate : public CefBrowserViewDelegate {
  public:
@@ -51,21 +55,20 @@ class AlloyBrowserViewDelegate : public CefBrowserViewDelegate {
   DISALLOW_COPY_AND_ASSIGN(AlloyBrowserViewDelegate);
 };
 
-// The chrome browser view: alloy style.
-class ChromeViewDelegate : public CefBrowserViewDelegate {
+class ViewDelegate : public CefBrowserViewDelegate {
  public:
-  ChromeViewDelegate() = default;
+  ViewDelegate() = default;
 
   cef_runtime_style_t GetBrowserRuntimeStyle() override {
     return CEF_RUNTIME_STYLE_ALLOY;
   }
 
  private:
-  IMPLEMENT_REFCOUNTING(ChromeViewDelegate);
-  DISALLOW_COPY_AND_ASSIGN(ChromeViewDelegate);
+  IMPLEMENT_REFCOUNTING(ViewDelegate);
+  DISALLOW_COPY_AND_ASSIGN(ViewDelegate);
 };
 
-// A panel with a fixed preferred size on either axis (0 = unconstrained).
+
 class FixedSizePanelDelegate : public CefPanelDelegate {
  public:
   FixedSizePanelDelegate(int width, int height)
@@ -214,7 +217,7 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
 
   BuildUi(window);
   CreateTab(initial_url_);
-  window->CenterWindow(CefSize(1000, 700));
+  window->CenterWindow(CefSize(window_width, window_height));
   window->Show();
 }
 
@@ -229,9 +232,9 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
   browser_to_tab_.clear();
   tabs_.clear();
   content_ = nullptr;
-  chrome_view_ = nullptr;
-  chrome_browser_ = nullptr;
-  chrome_view_delegate_ = nullptr;
+  view_ = nullptr;
+  browser_ = nullptr;
+  view_delegate_ = nullptr;
   browser_view_delegate_ = nullptr;
   window_ = nullptr;
 
@@ -274,13 +277,12 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow> window) {
 }
 
 CefRect BrowserWindow::GetInitialBounds(CefRefPtr<CefWindow> window) {
-  return CefRect(0, 0, 1000, 700);
+  return CefRect(0, 0, window_width, window_height);
 }
 
 CefSize BrowserWindow::GetPreferredSize(CefRefPtr<CefView> view) {
-  // Only report a preferred size for the top-level window.
-  if (view && view->GetID() == kWindowId) {
-    return CefSize(1000, 700);
+  if (view && view->GetID() == window_id) {
+    return CefSize(window_width, window_height);
   }
   return CefSize();
 }
@@ -290,13 +292,13 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window,
   CEF_REQUIRE_UI_THREAD();
 
   switch (command_id) {
-    case kCommandNewTab:
-      CreateTab(kDefaultUrl);
+    case command_new_tab:
+      CreateTab(default_url);
       return true;
-    case kCommandCloseTab:
+    case command_close_tab:
       CloseActiveTab();
       return true;
-    case kCommandFocusUrl:
+    case command_focus_url:
       if (chrome_browser_ && chrome_browser_->GetMainFrame()) {
         chrome_browser_->GetMainFrame()->ExecuteJavaScript(
             "window.strome && window.strome.focusAddress();",
@@ -326,7 +328,7 @@ bool BrowserWindow::WithStandardWindowButtons(CefRefPtr<CefWindow> window) {
 bool BrowserWindow::GetTitlebarHeight(CefRefPtr<CefWindow> window,
                                       float* titlebar_height) {
   // Position the traffic lights halfway down the tab strip.
-  *titlebar_height = static_cast<float>(kTabStripHeight);
+  *titlebar_height = static_cast<float>(tab_strip_height);
   return true;
 }
 
@@ -344,7 +346,7 @@ void BrowserWindow::OnDraggableRegionsChanged(
   // coordinates into window space.
   std::vector<CefDraggableRegion> window_regions = regions;
   for (auto& region : window_regions) {
-    region.bounds.x += kWindowButtonsWidth;
+    region.bounds.x += window_buttons_width;
   }
   window_->SetDraggableRegions(window_regions);
 }
@@ -506,7 +508,7 @@ bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
   if (command == "ready") {
     PushChromeState();
   } else if (command == "newtab") {
-    CreateTab(kDefaultUrl);
+    CreateTab(default_url);
   } else if (command == "activate") {
     const int id = ParseInt(arg, 0);
     if (id != 0) {
@@ -545,7 +547,7 @@ void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
   window->SetTitle("Strome");
 
   // Dark theme so the native/OS chrome and any gaps match the UI.
-  window->SetThemeColor(CEF_ColorPrimaryBackground, kContentBackground);
+  window->SetThemeColor(CEF_ColorPrimaryBackground, content_background);
 
   CefBoxLayoutSettings window_settings;
   window_settings.horizontal = false;
@@ -556,46 +558,46 @@ void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
   // chrome UI browser view filling the rest. The chrome view must not overlap
   // the button region because browser views render above the native buttons.
   CefRefPtr<CefPanel> chrome_row =
-      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, kChromeHeight));
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, chrome_height));
   CefBoxLayoutSettings row_settings;
   row_settings.horizontal = true;
   CefRefPtr<CefBoxLayout> row_layout = chrome_row->SetToBoxLayout(row_settings);
   window->AddChildView(chrome_row);
 
   CefRefPtr<CefPanel> gap =
-      CefPanel::CreatePanel(new FixedSizePanelDelegate(kWindowButtonsWidth,
-                                                       kChromeHeight));
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(window_buttons_width,
+                                                       chrome_height));
   CefBoxLayoutSettings gap_settings;
   gap_settings.horizontal = false;
   gap->SetToBoxLayout(gap_settings);
   CefRefPtr<CefPanel> gap_strip =
-      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, kTabStripHeight));
-  gap_strip->SetBackgroundColor(kTabStripBackground);
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, tab_strip_height));
+  gap_strip->SetBackgroundColor(tab_strip_background);
   gap->AddChildView(gap_strip);
   CefRefPtr<CefPanel> gap_toolbar =
-      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, kToolbarHeight));
-  gap_toolbar->SetBackgroundColor(kToolbarBackground);
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, toolbar_height));
+  gap_toolbar->SetBackgroundColor(toolbar_background);
   gap->AddChildView(gap_toolbar);
   chrome_row->AddChildView(gap);
 
-  CefRefPtr<CefPanel> chrome_panel =
-      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, kChromeHeight));
+  CefRefPtr<CefPanel> panel =
+      CefPanel::CreatePanel(new FixedSizePanelDelegate(0, chrome_height));
   chrome_panel->SetToFillLayout();
-  chrome_panel->SetBackgroundColor(kTabStripBackground);
-  chrome_row->AddChildView(chrome_panel);
-  row_layout->SetFlexForView(chrome_panel, 1);
+  chrome_panel->SetBackgroundColor(tab_strip_background);
+  chrome_row->AddChildView(panel);
+  row_layout->SetFlexForView(panel, 1);
 
   chrome_view_delegate_ = new ChromeViewDelegate();
-  CefBrowserSettings chrome_settings;
+  CefBrowserSettings settings;
   chrome_view_ = CefBrowserView::CreateBrowserView(
-      CefRefPtr<CefClient>(this), chrome_ui::kUrl, chrome_settings, nullptr,
+      CefRefPtr<CefClient>(this), views::url, settings, nullptr,
       nullptr, chrome_view_delegate_);
   chrome_panel->AddChildView(chrome_view_);
 
   // All tab BrowserViews overlap here; only the active one is visible.
   content_ = CefPanel::CreatePanel(nullptr);
   content_->SetToFillLayout();
-  content_->SetBackgroundColor(kContentBackground);
+  content_->SetBackgroundColor(content_background);
   window->AddChildView(content_);
   window_layout->SetFlexForView(content_, 1);
 
@@ -607,9 +609,9 @@ void BrowserWindow::BuildUi(CefRefPtr<CefWindow> window) {
 
   // On macOS CEF maps ctrl_pressed to the Command key, so these become Cmd+T,
   // Cmd+W and Cmd+L there and Ctrl+T/W/L on Windows and Linux.
-  window->SetAccelerator(kCommandNewTab, 'T', false, true, false, true);
-  window->SetAccelerator(kCommandCloseTab, 'W', false, true, false, true);
-  window->SetAccelerator(kCommandFocusUrl, 'L', false, true, false, true);
+  window->SetAccelerator(command_new_tab, 'T', false, true, false, true);
+  window->SetAccelerator(command_close_tab, 'W', false, true, false, true);
+  window->SetAccelerator(command_focus_url, 'L', false, true, false, true);
 
   window->ThemeChanged();
 }

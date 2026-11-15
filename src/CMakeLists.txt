@@ -1,13 +1,13 @@
 
 set(STROME_SRCS
-  strome.cpp
-  strome.hpp
-  browser_window.cpp
-  browser_window.hpp
-  browser_window_manager.cpp
-  browser_window_manager.hpp
-  browser_ui.cpp
-  browser_ui.hpp
+  Strome.cpp
+  Strome.hpp
+  Window.cpp
+  Window.hpp
+  Manager.cpp
+  Manager.hpp
+  views/HomePage.cpp
+  views/HomePage.hpp
 )
 
 set(STROME_SRCS_MAC mac/strome.mm)
@@ -16,7 +16,7 @@ APPEND_PLATFORM_SOURCES(STROME_SRCS)
 source_group(strome FILES ${STROME_SRCS})
 
 
-set(STROME_HELPER_SRCS_MAC process_helper_mac.cpp)
+set(STROME_HELPER_SRCS_MAC Process.cpp)
 APPEND_PLATFORM_SOURCES(STROME_HELPER_SRCS)
 source_group(strome FILES ${STROME_HELPER_SRCS})
 

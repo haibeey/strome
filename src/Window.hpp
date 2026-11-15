@@ -18,7 +18,7 @@
 
 // Owns one top-level CefWindow and the tabs displayed inside it.
 //
-// The browser chrome (tab strip + toolbar) is an HTML page served over the
+// The browser (tab strip + toolbar) is an HTML page served over the
 // "strome://" scheme and shown in a CefBrowserView overlaid on top of the
 // window. Each tab is a separate CefBrowserView backed by its own
 // CefRequestContext. A context created with an empty cache_path is an in-memory
@@ -36,11 +36,10 @@ class BrowserWindow : public CefWindowDelegate,
   explicit BrowserWindow(std::string initial_url);
   ~BrowserWindow() override;
 
-  // Called by BrowserWindowManager to identify this window on destruction.
   void SetManagerId(int manager_id) { manager_id_ = manager_id; }
   int GetManagerId() const { return manager_id_; }
 
-  // Brings the window to the front (used when the macOS dock icon is clicked).
+  // Brings the window to the front.
   void Activate();
 
   // Requests that all tab browsers close. When |force_close| is false,
@@ -128,8 +127,8 @@ class BrowserWindow : public CefWindowDelegate,
   void CloseActiveTab();
   void NavigateTo(const std::string& input);
 
-  void PushChromeState();
-  std::string BuildChromeState();
+  void PushState();
+  std::string BuildState();
   void UpdateWindowTitle();
 
   Tab* GetTabById(int tab_id);
@@ -138,9 +137,9 @@ class BrowserWindow : public CefWindowDelegate,
 
   CefRefPtr<CefWindow> window_;
   CefRefPtr<CefPanel> content_;
-  CefRefPtr<CefBrowserView> chrome_view_;
-  CefRefPtr<CefBrowser> chrome_browser_;
-  CefRefPtr<CefBrowserViewDelegate> chrome_view_delegate_;
+  CefRefPtr<CefBrowserView> view_;
+  CefRefPtr<CefBrowser> browser_;
+  CefRefPtr<CefBrowserViewDelegate> view_delegate_;
   CefRefPtr<CefBrowserViewDelegate> browser_view_delegate_;
   CefRefPtr<CefMessageRouterBrowserSide> message_router_;
 
@@ -158,4 +157,4 @@ class BrowserWindow : public CefWindowDelegate,
   DISALLOW_COPY_AND_ASSIGN(BrowserWindow);
 };
 
-#endif  // STROME_BROWSER_WINDOW_H_
+#endif

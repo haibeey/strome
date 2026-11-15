@@ -5,8 +5,8 @@
 #include "include/cef_command_line.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
-#include "../browser_window_manager.hpp"
-#include "../strome.hpp"
+#include "../Manager.hpp"
+#include "../Strome.hpp"
 
 @interface StromeDelegate : NSObject <NSApplicationDelegate>
 

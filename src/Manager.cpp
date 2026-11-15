@@ -1,10 +1,13 @@
-#include "browser_window_manager.hpp"
 
-#include "browser_window.hpp"
+
 #include "include/base/cef_callback.h"
 #include "include/cef_app.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
+
+
+#include "Manager.hpp"
+#include "Window.hpp"
 
 namespace {
 constexpr char kDefaultUrl[] = "https://google.com";

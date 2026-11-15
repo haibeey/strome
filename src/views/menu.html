@@ -1,15 +1,3 @@
-#include "browser_ui.hpp"
-
-#include <string>
-
-#include "include/cef_scheme.h"
-#include "include/cef_stream.h"
-#include "include/wrapper/cef_stream_resource_handler.h"
-
-namespace chrome_ui {
-namespace {
-
-const char kHtml[] = R"HTML(<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -144,31 +132,3 @@ const char kHtml[] = R"HTML(<!doctype html>
 </script>
 </body>
 </html>
-)HTML";
-
-class ChromeSchemeHandlerFactory : public CefSchemeHandlerFactory {
- public:
-  CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser> browser,
-                                       CefRefPtr<CefFrame> frame,
-                                       const CefString& scheme_name,
-                                       CefRefPtr<CefRequest> request) override {
-    // The HTML is a process-lifetime constant, so the stream can reference it
-    // without copying.
-    static const std::string html(kHtml);
-    CefRefPtr<CefStreamReader> stream = CefStreamReader::CreateForData(
-        const_cast<char*>(html.data()), html.size());
-    return new CefStreamResourceHandler("text/html", stream);
-  }
-
- private:
-  IMPLEMENT_REFCOUNTING(ChromeSchemeHandlerFactory);
-};
-
-}  // namespace
-
-void Register() {
-  CefRegisterSchemeHandlerFactory(kScheme, "ui",
-                                  new ChromeSchemeHandlerFactory());
-}
-
-}  // namespace chrome_ui

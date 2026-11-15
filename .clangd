@@ -1,2 +1,2 @@
 CompileFlags:
-  CompilationDatabase: build/build
+  CompilationDatabase: cef/macosx64
