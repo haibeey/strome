@@ -1,6 +1,8 @@
 # strome
 Browser where each tab is isolated (incognito). Useful for multi-account sites.
 
+![Demo](tests/strome_demo.gif)
+
 ## Build (macOS)
 Requires Xcode CLT, `cmake`, `curl`, `tar`.
 
