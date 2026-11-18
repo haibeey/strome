@@ -464,6 +464,20 @@ bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
     if (id != 0) {
       CloseTab(id);
     }
+  } else if (command == "renametab") {
+    const size_t arg_sep = arg.find('|');
+    if (arg_sep != std::string::npos) {
+      const int id = strome::ParseInt(arg.substr(0, arg_sep), 0);
+      const std::string title = arg.substr(arg_sep + 1);
+      if (id != 0) {
+        Tab* tab = GetTabById(id);
+        if (tab) {
+          tab->title = title.empty() ? std::string("New Tab") : title;
+          UpdateWindowTitle();
+          PushState();
+        }
+      }
+    }
   } else if (command == "navigate") {
     NavigateTo(arg);
   } else if (command == "back" || command == "forward" ||
