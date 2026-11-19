@@ -10,7 +10,8 @@
   }
   #chrome { display: flex; flex-direction: column; height: 100%; -webkit-app-region: drag; }
   .tab, .iconbtn, .navbtn, #address { -webkit-app-region: no-drag; }
-  #tabs { display: flex; align-items: flex-end; gap: 2px; height: 40px; padding: 6px 8px 0; background: #1b1b1e; }
+  #tabs { display: flex; align-items: flex-end; gap: 2px; height: 40px; padding: 6px 8px 0; background: #1b1b1e; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  #tabs::-webkit-scrollbar { display: none; }
   .tab {
     display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 10px;
     border-radius: 9px 9px 0 0; background: transparent; color: #9aa0a6;
@@ -33,19 +34,30 @@
     display: flex; align-items: center; justify-content: center; color: #c9ccd1; font-size: 17px;
   }
   .iconbtn:hover { background: rgba(255,255,255,.1); color: #fff; }
-  #toolbar { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px; background: #2a2b2e; }
+  #toolbar { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px; background: #2a2b2e; position: relative; z-index: 10; }
   .navbtn {
     flex: 0 0 auto; width: 28px; height: 28px; border-radius: 7px; display: flex;
     align-items: center; justify-content: center; color: #c9ccd1;
   }
   .navbtn:hover { background: rgba(255,255,255,.1); color: #fff; }
   .navbtn.disabled { opacity: .35; }
+  #address-wrap { position: relative; flex: 1 1 auto; }
   #address {
-    flex: 1 1 auto; height: 28px; border: none; outline: none; border-radius: 14px;
+    width: 100%; height: 28px; border: none; outline: none; border-radius: 14px;
     background: #3a3b3f; color: #f5f5f5; padding: 0 14px; font-size: 12.5px;
   }
   #address::placeholder { color: #9aa0a6; }
   #address:focus { background: #43444a; }
+  #suggestions {
+    display: none; position: absolute; left: 0; right: 0; top: 32px;
+    background: #2f3034; border: 1px solid #3f4046; border-radius: 10px;
+    overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
+  #suggestions.show { display: block; }
+  .suggestion { padding: 7px 12px; cursor: default; }
+  .suggestion.selected, .suggestion:hover { background: #3a3b40; }
+  .suggestion .s-title { font-size: 12px; color: #f5f5f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .suggestion .s-url { font-size: 11px; color: #9aa0a6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 </style>
 </head>
 <body>
@@ -61,7 +73,10 @@
     <div class="navbtn" id="reload" title="Reload">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.46-3.54"/><path d="M13 3.5v3h-3"/></svg>
     </div>
-    <input id="address" placeholder="Search or enter address" spellcheck="false" autocomplete="off">
+    <div id="address-wrap">
+      <input id="address" placeholder="Search or enter address" spellcheck="false" autocomplete="off">
+      <div id="suggestions"></div>
+    </div>
   </div>
 </div>
 <script>
@@ -69,15 +84,72 @@
 
   var tabsEl = document.getElementById('tabs');
   var addr = document.getElementById('address');
+  var suggestionsEl = document.getElementById('suggestions');
   var backBtn = document.getElementById('back');
   var forwardBtn = document.getElementById('forward');
   var state = { tabs: [], url: '', canBack: false, canForward: false };
   var editing = false;
+  var suggestions = [];
+  var selectedSuggestion = -1;
 
   function query(req) {
     if (window.cefQuery) {
       window.cefQuery({ request: req, onSuccess: function () {}, onFailure: function () {} });
     }
+  }
+
+  function queryWithResult(req, cb) {
+    if (window.cefQuery) {
+      window.cefQuery({ request: req, onSuccess: cb, onFailure: function () { cb(''); } });
+    } else {
+      cb('');
+    }
+  }
+
+  function hideSuggestions() {
+    suggestions = [];
+    selectedSuggestion = -1;
+    suggestionsEl.textContent = '';
+    suggestionsEl.classList.remove('show');
+  }
+
+  function renderSuggestions() {
+    suggestionsEl.textContent = '';
+    if (!suggestions.length) { hideSuggestions(); return; }
+    for (var i = 0; i < suggestions.length; i++) {
+      (function (idx) {
+        var s = suggestions[idx];
+        var item = document.createElement('div');
+        item.className = 'suggestion' + (idx === selectedSuggestion ? ' selected' : '');
+        var t = document.createElement('div');
+        t.className = 's-title';
+        t.textContent = s.title || s.url || '';
+        var u = document.createElement('div');
+        u.className = 's-url';
+        u.textContent = s.url || '';
+        item.appendChild(t);
+        item.appendChild(u);
+        item.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          editing = false;
+          hideSuggestions();
+          query('navigate|' + s.url);
+          addr.blur();
+        });
+        suggestionsEl.appendChild(item);
+      })(i);
+    }
+    suggestionsEl.classList.add('show');
+  }
+
+  function fetchSuggestions(value) {
+    queryWithResult('suggest|' + value, function (res) {
+      var items = [];
+      try { items = JSON.parse(res) || []; } catch (e) { items = []; }
+      suggestions = items;
+      selectedSuggestion = -1;
+      renderSuggestions();
+    });
   }
 
   function startRename(titleEl, t) {
@@ -138,6 +210,14 @@
     return el;
   }
 
+  // A mouse wheel scrolls the tab strip sideways when tabs overflow.
+  tabsEl.addEventListener('wheel', function (e) {
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      tabsEl.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
   function render() {
     if (!tabsEl.querySelector('.title[data-editing]')) {
       tabsEl.textContent = '';
@@ -148,6 +228,8 @@
       plus.title = 'New tab';
       plus.addEventListener('click', function () { query('newtab'); });
       tabsEl.appendChild(plus);
+      var active = tabsEl.querySelector('.tab.active');
+      if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
 
     backBtn.classList.toggle('disabled', !state.canBack);
@@ -157,13 +239,32 @@
 
   window.strome = {
     update: function (s) { state = s || state; render(); },
-    focusAddress: function () { editing = true; addr.focus(); addr.select(); }
+    focusAddress: function () { editing = true; addr.focus(); addr.select(); fetchSuggestions(addr.value || ''); }
   };
 
-  addr.addEventListener('focus', function () { editing = true; });
-  addr.addEventListener('blur', function () { editing = false; addr.value = state.url || ''; });
+  addr.addEventListener('focus', function () { editing = true; fetchSuggestions(addr.value || ''); });
+  addr.addEventListener('blur', function () { editing = false; addr.value = state.url || ''; hideSuggestions(); });
+  addr.addEventListener('input', function () { fetchSuggestions(addr.value || ''); });
   addr.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { editing = false; query('navigate|' + addr.value); addr.blur(); }
+    if (e.key === 'ArrowDown' && suggestions.length) {
+      e.preventDefault();
+      selectedSuggestion = Math.min(selectedSuggestion + 1, suggestions.length - 1);
+      renderSuggestions();
+    } else if (e.key === 'ArrowUp' && suggestions.length) {
+      e.preventDefault();
+      selectedSuggestion = Math.max(selectedSuggestion - 1, -1);
+      renderSuggestions();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      var target = (selectedSuggestion >= 0 && suggestions[selectedSuggestion]) ? suggestions[selectedSuggestion].url : addr.value;
+      editing = false;
+      hideSuggestions();
+      query('navigate|' + target);
+      addr.blur();
+    } else if (e.key === 'Escape') {
+      hideSuggestions();
+      addr.blur();
+    }
   });
   backBtn.addEventListener('click', function () { query('back'); });
   forwardBtn.addEventListener('click', function () { query('forward'); });

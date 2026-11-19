@@ -33,6 +33,12 @@
 	<string>13.0</string>
 	<key>LSUIElement</key>
 	<string>1</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Strome needs camera access for video calls.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Strome needs microphone access for calls and meetings.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Strome needs screen recording access for screen sharing.</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 </dict>

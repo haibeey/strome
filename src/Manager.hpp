@@ -13,7 +13,7 @@ class BrowserWindowManager {
  public:
   static BrowserWindowManager* GetInstance();
 
-  void CreateWindow(const std::string& initial_url);
+  void CreateWindow(std::string initial_url);
   void CloseAllWindows(bool force_close);
 
   bool IsClosing() const { return is_closing_; }
@@ -31,6 +31,7 @@ class BrowserWindowManager {
   std::map<int, CefRefPtr<BrowserWindow>> windows_;
   int next_window_id_ = 1;
   bool is_closing_ = false;
+  std::string initial_url = "";
 };
 
 #endif  // STROME_BROWSER_WINDOW_MANAGER_H_

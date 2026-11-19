@@ -8,6 +8,7 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_drag_handler.h"
+#include "include/cef_permission_handler.h"
 #include "include/cef_request_context.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
@@ -30,6 +31,7 @@ class BrowserWindow : public CefWindowDelegate,
                       public CefDragHandler,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
+                      public CefPermissionHandler,
                       public CefRequestHandler,
                       public CefMessageRouterBrowserSide::Handler {
  public:
@@ -66,6 +68,7 @@ class BrowserWindow : public CefWindowDelegate,
   CefRefPtr<CefDragHandler> GetDragHandler() override { return this; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+  CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
   bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
                                 CefRefPtr<CefFrame> frame,
@@ -102,6 +105,20 @@ class BrowserWindow : public CefWindowDelegate,
                       bool user_gesture,
                       bool is_redirect) override;
 
+  // CefPermissionHandler methods:
+  bool OnRequestMediaAccessPermission(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefFrame> frame,
+      const CefString& requesting_origin,
+      uint32_t requested_permissions,
+      CefRefPtr<CefMediaAccessCallback> callback) override;
+  bool OnShowPermissionPrompt(
+      CefRefPtr<CefBrowser> browser,
+      uint64_t prompt_id,
+      const CefString& requesting_origin,
+      uint32_t requested_permissions,
+      CefRefPtr<CefPermissionPromptCallback> callback) override;
+
   // CefMessageRouterBrowserSide::Handler method:
   bool OnQuery(CefRefPtr<CefBrowser> browser,
                CefRefPtr<CefFrame> frame,
@@ -116,8 +133,14 @@ class BrowserWindow : public CefWindowDelegate,
     int browser_id = -1;
     std::string title;
     std::string url;
+    bool title_overridden = false;
     CefRefPtr<CefRequestContext> request_context;
     CefRefPtr<CefBrowserView> browser_view;
+  };
+
+  struct HistoryEntry {
+    std::string url;
+    std::string title;
   };
 
   void BuildUi(CefRefPtr<CefWindow> window);
@@ -127,6 +150,9 @@ class BrowserWindow : public CefWindowDelegate,
   void CloseTab(int tab_id);
   void CloseActiveTab();
   void NavigateTo(const std::string& input);
+
+  void RecordHistory(const std::string& url, const std::string& title);
+  std::string BuildSuggestions(const std::string& input) const;
 
   void PushState();
   std::string BuildState();
@@ -145,6 +171,7 @@ class BrowserWindow : public CefWindowDelegate,
   CefRefPtr<CefMessageRouterBrowserSide> message_router_;
 
   std::vector<Tab> tabs_;
+  std::vector<HistoryEntry> history_;
   std::map<int, int> browser_to_tab_;
   int active_tab_id_ = 0;
   int next_tab_id_ = 1;

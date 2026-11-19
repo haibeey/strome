@@ -1,4 +1,6 @@
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <string>
 #include <utility>
@@ -12,6 +14,11 @@
 #include "include/views/cef_fill_layout.h"
 #include "include/views/cef_panel_delegate.h"
 #include "include/wrapper/cef_helpers.h"
+#if defined(__APPLE__)
+#include "include/base/cef_callback.h"
+#include "include/wrapper/cef_closure_task.h"
+#include "mac/MediaAccess.hpp"
+#endif
 
 #include "Window.hpp"
 #include "Manager.hpp"
@@ -37,7 +44,6 @@ constexpr int chrome_height = tab_strip_height + toolbar_height;
 // Width reserved on the left for the native macOS window buttons.
 constexpr int window_buttons_width = 80;
 
-constexpr char default_url[] = "https://google.com";
 constexpr cef_color_t content_background = 0xFF202124;
 constexpr cef_color_t tab_strip_background = 0xFF1B1B1E;
 constexpr cef_color_t toolbar_background = 0xFF2A2B2E;
@@ -207,7 +213,7 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window,
 
   switch (command_id) {
     case command_new_tab:
-      CreateTab(default_url);
+      CreateTab(initial_url_);
       return true;
     case command_close_tab:
       CloseActiveTab();
@@ -286,6 +292,49 @@ bool BrowserWindow::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
   return false;
 }
 
+bool BrowserWindow::OnRequestMediaAccessPermission(
+    CefRefPtr<CefBrowser> browser,
+    CefRefPtr<CefFrame> frame,
+    const CefString& requesting_origin,
+    uint32_t requested_permissions,
+    CefRefPtr<CefMediaAccessCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+
+  if (!callback) {
+    return false;
+  }
+#if defined(__APPLE__)
+  // CEF does not ask macOS for camera/microphone access itself; without a
+  // system grant capture starts but delivers black frames and silence.
+  const bool video = requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
+  const bool audio = requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE;
+  RequestSystemMediaAccess(video, audio, [callback, requested_permissions](bool video_ok, bool audio_ok) {
+    uint32_t granted = requested_permissions;
+    if (!video_ok) granted &= ~CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
+    if (!audio_ok) granted &= ~CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE;
+    CefPostTask(TID_UI, base::BindOnce(&CefMediaAccessCallback::Continue, callback, granted));
+  });
+#else
+  callback->Continue(requested_permissions);
+#endif
+  return true;
+}
+
+bool BrowserWindow::OnShowPermissionPrompt(
+    CefRefPtr<CefBrowser> browser,
+    uint64_t prompt_id,
+    const CefString& requesting_origin,
+    uint32_t requested_permissions,
+    CefRefPtr<CefPermissionPromptCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+
+  if (callback) {
+    callback->Continue(CEF_PERMISSION_RESULT_ACCEPT);
+    return true;
+  }
+  return false;
+}
+
 void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser,
                                     CefRefPtr<CefFrame> frame,
                                     const CefString& url) {
@@ -301,6 +350,7 @@ void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser,
   }
 
   tab->url = url.ToString();
+  RecordHistory(tab->url, tab->title);
   if (tab->id == active_tab_id_) {
     PushState();
   }
@@ -315,7 +365,10 @@ void BrowserWindow::OnTitleChange(CefRefPtr<CefBrowser> browser,
     return;
   }
 
-  tab->title = title.ToString();
+  if (!tab->title_overridden) {
+    tab->title = title.ToString();
+  }
+  RecordHistory(tab->url, tab->title);
   if (tab->id == active_tab_id_) {
     UpdateWindowTitle();
   }
@@ -337,11 +390,6 @@ void BrowserWindow::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
 void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
 
-  // Popups are not tabs. They keep the opener's request context automatically.
-  if (browser->IsPopup()) {
-    return;
-  }
-
   CefRefPtr<CefBrowserView> view = CefBrowserView::GetForBrowser(browser);
   if (view && view_ && view->IsSame(view_)) {
     browser_ = browser;
@@ -351,11 +399,14 @@ void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
   Tab* tab = nullptr;
   if (view) {
     for (auto& candidate : tabs_) {
-      if (candidate.browser_view.get() == view.get()) {
+      if (candidate.browser_view && candidate.browser_view->IsSame(view)) {
         tab = &candidate;
         break;
       }
     }
+  }
+  if (!tab && browser->IsPopup()) {
+    return;
   }
   if (!tab && pending_tab_id_ != 0) {
     tab = GetTabById(pending_tab_id_);
@@ -453,7 +504,7 @@ bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
   if (command == "ready") {
     PushState();
   } else if (command == "newtab") {
-    CreateTab(default_url);
+    CreateTab(initial_url_);
   } else if (command == "activate") {
     const int id = strome::ParseInt(arg, 0);
     if (id != 0) {
@@ -473,6 +524,7 @@ bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
         Tab* tab = GetTabById(id);
         if (tab) {
           tab->title = title.empty() ? std::string("New Tab") : title;
+          tab->title_overridden = true;
           UpdateWindowTitle();
           PushState();
         }
@@ -480,6 +532,9 @@ bool BrowserWindow::OnQuery(CefRefPtr<CefBrowser> browser,
     }
   } else if (command == "navigate") {
     NavigateTo(arg);
+  } else if (command == "suggest") {
+    callback->Success(BuildSuggestions(arg));
+    return true;
   } else if (command == "back" || command == "forward" ||
              command == "reload") {
     Tab* tab = GetActiveTab();
@@ -742,10 +797,75 @@ void BrowserWindow::NavigateTo(const std::string& input) {
     return;
   }
 
+  tab->title_overridden = false;
   tab->url = url;
   browser->GetMainFrame()->LoadURL(url);
   tab->browser_view->RequestFocus();
   PushState();
+}
+
+void BrowserWindow::RecordHistory(const std::string& url,
+                                  const std::string& title) {
+  if (url.empty() || url.rfind(views::scheme, 0) == 0) {
+    return;
+  }
+
+  for (auto it = history_.begin(); it != history_.end(); ++it) {
+    if (it->url == url) {
+      if (!title.empty()) {
+        it->title = title;
+      }
+      HistoryEntry entry = *it;
+      history_.erase(it);
+      history_.insert(history_.begin(), entry);
+      return;
+    }
+  }
+
+  history_.insert(history_.begin(), {url, title});
+  if (history_.size() > 200) {
+    history_.resize(200);
+  }
+}
+
+std::string BrowserWindow::BuildSuggestions(const std::string& input) const {
+  std::string q = strome::Trim(input);
+  std::transform(q.begin(), q.end(), q.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+
+  std::string json = "[";
+  bool first = true;
+  int count = 0;
+  for (const auto& entry : history_) {
+    std::string url_l = entry.url;
+    std::string title_l = entry.title;
+    std::transform(url_l.begin(), url_l.end(), url_l.begin(),
+                   [](unsigned char c) {
+                     return static_cast<char>(std::tolower(c));
+                   });
+    std::transform(title_l.begin(), title_l.end(), title_l.begin(),
+                   [](unsigned char c) {
+                     return static_cast<char>(std::tolower(c));
+                   });
+
+    if (!q.empty() && url_l.find(q) == std::string::npos &&
+        title_l.find(q) == std::string::npos) {
+      continue;
+    }
+
+    if (!first) {
+      json += ",";
+    }
+    first = false;
+    json += "{\"url\":\"" + strome::JsonEscape(entry.url) +
+            "\",\"title\":\"" + strome::JsonEscape(entry.title) + "\"}";
+    if (++count >= 8) {
+      break;
+    }
+  }
+  json += "]";
+  return json;
 }
 
 void BrowserWindow::PushState() {

@@ -31,6 +31,12 @@
 	<string>13.0</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Strome needs camera access for video calls.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Strome needs microphone access for calls and meetings.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Strome needs screen recording access for screen sharing.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>

@@ -12,7 +12,7 @@ set(STROME_SRCS
   views/HomePage.hpp
 )
 
-set(STROME_SRCS_MAC mac/strome.mm)
+set(STROME_SRCS_MAC mac/strome.mm mac/MediaAccess.mm mac/MediaAccess.hpp)
 
 APPEND_PLATFORM_SOURCES(STROME_SRCS)
 source_group(strome FILES ${STROME_SRCS})
@@ -79,7 +79,7 @@ if(OS_MAC)
   ${STROME_RESOURCES_SRCS} ${STROME_SRCS})
   SET_EXECUTABLE_TARGET_PROPERTIES(${CEF_TARGET})
   add_dependencies(${CEF_TARGET} libcef_dll_wrapper)
-  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_STANDARD_LIBS} "-framework AVFoundation")
   set_target_properties(${CEF_TARGET} PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/mac/Info.plist.in
     )
@@ -142,6 +142,18 @@ if(OS_MAC)
     COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_CURRENT_SOURCE_DIR}/views/menu.html"
             "${CEF_APP}/Contents/Resources/views/menu.html"
+    VERBATIM
+    )
+
+  # Sign last, after the helpers and resources are copied into the bundle.
+  # Without the camera/microphone entitlements macOS refuses media access to
+  # an unsigned app, and pages report the devices as "in use".
+  add_custom_command(
+    TARGET ${CEF_TARGET}
+    POST_BUILD
+    COMMAND codesign --force --deep --sign -
+            --entitlements "${CMAKE_CURRENT_SOURCE_DIR}/mac/strome.entitlements"
+            "${CEF_APP}"
     VERBATIM
     )
 endif()

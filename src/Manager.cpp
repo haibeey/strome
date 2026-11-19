@@ -5,25 +5,21 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
-
 #include "Manager.hpp"
 #include "Window.hpp"
 
-namespace {
-constexpr char kDefaultUrl[] = "https://google.com";
-}  // namespace
-
-BrowserWindowManager* BrowserWindowManager::GetInstance() {
+BrowserWindowManager *BrowserWindowManager::GetInstance() {
   static BrowserWindowManager instance;
   return &instance;
 }
 
 BrowserWindowManager::~BrowserWindowManager() = default;
 
-void BrowserWindowManager::CreateWindow(const std::string& initial_url) {
+void BrowserWindowManager::CreateWindow(std::string url) {
   CEF_REQUIRE_UI_THREAD();
 
-  CefRefPtr<BrowserWindow> window = new BrowserWindow(initial_url);
+  initial_url = url;
+  CefRefPtr<BrowserWindow> window = new BrowserWindow(url);
   const int manager_id = next_window_id_++;
   window->SetManagerId(manager_id);
   windows_[manager_id] = window;
@@ -33,16 +29,15 @@ void BrowserWindowManager::CreateWindow(const std::string& initial_url) {
 
 void BrowserWindowManager::CloseAllWindows(bool force_close) {
   if (!CefCurrentlyOn(TID_UI)) {
-    CefPostTask(TID_UI,
-                base::BindOnce(&BrowserWindowManager::CloseAllWindows,
-                               base::Unretained(this), force_close));
+    CefPostTask(TID_UI, base::BindOnce(&BrowserWindowManager::CloseAllWindows,
+                                       base::Unretained(this), force_close));
     return;
   }
 
   is_closing_ = true;
 
   auto windows_copy = windows_;
-  for (auto& pair : windows_copy) {
+  for (auto &pair : windows_copy) {
     if (pair.second) {
       pair.second->Close(force_close);
     }
@@ -60,7 +55,8 @@ void BrowserWindowManager::ShowMainWindow() {
     return;
   }
 
-  CreateWindow(kDefaultUrl);
+  std::string url = initial_url.size() <= 0 ? "google.com" : initial_url;
+  CreateWindow(url);
 }
 
 void BrowserWindowManager::OnWindowDestroyed(int manager_id) {

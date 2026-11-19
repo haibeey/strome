@@ -1,18 +1,9 @@
-# Copyright (c) 2016 The Chromium Embedded Framework Authors. All rights
-# reserved. Use of this source code is governed by a BSD-style license that
-# can be found in the LICENSE file.
 
-# Must be loaded via FindCEF.cmake.
 if(NOT DEFINED _CEF_ROOT_EXPLICIT)
   message(FATAL_ERROR "Use find_package(CEF) to load this file.")
 endif()
 
 
-#
-# Shared macros.
-#
-
-# Print the current CEF configuration.
 macro(PRINT_CEF_CONFIG)
   message(STATUS "*** CEF CONFIGURATION SETTINGS ***")
   message(STATUS "Generator:                    ${CMAKE_GENERATOR}")
@@ -182,7 +173,6 @@ macro(FIND_LINUX_LIBRARIES libraries)
   list(APPEND CEF_STANDARD_LIBS       ${FLL_LIBS})
 endmacro()
 
-# Set SUID permissions on the specified executable.
 macro(SET_LINUX_SUID_PERMISSIONS target executable)
   add_custom_command(
     TARGET ${target}
